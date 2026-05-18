@@ -3,7 +3,6 @@ package kyber
 import (
 	"crypto/rand"
 	"errors"
-	"fmt"
 )
 
 var (
@@ -41,9 +40,7 @@ func GenerateKeyPairDerand(mode *Mode, coins []byte) (*KeyPair, error) {
 
 func GenerateKeyPair(mode *Mode) (*KeyPair, error) {
 	var coins [64]byte
-	if _, err := rand.Read(coins[:]); err != nil {
-		return nil, fmt.Errorf("failed to read random entropy: %w", err)
-	}
+	rand.Read(coins[:])
 	kp, err := GenerateKeyPairDerand(mode, coins[:])
 	Zeroize(coins[:])
 	return kp, err
@@ -88,9 +85,7 @@ func EncapsulateDerand(mode *Mode, pk []byte, coins []byte) ([]byte, []byte, err
 
 func Encapsulate(mode *Mode, pk []byte) ([]byte, []byte, error) {
 	var coins [32]byte
-	if _, err := rand.Read(coins[:]); err != nil {
-		return nil, nil, fmt.Errorf("failed to read random entropy: %w", err)
-	}
+	rand.Read(coins[:])
 	ct, ss, err := EncapsulateDerand(mode, pk, coins[:])
 	Zeroize(coins[:])
 	return ct, ss, err

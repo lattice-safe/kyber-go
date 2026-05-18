@@ -8,7 +8,7 @@ import (
 // FuzzRoundtrip fuzzes the deterministic generation using raw entropy.
 func FuzzRoundtrip(f *testing.F) {
 	f.Add(make([]byte, 64), make([]byte, 32))
-	
+
 	f.Fuzz(func(t *testing.T, coinsKeyGen []byte, coinsEncaps []byte) {
 		if len(coinsKeyGen) != 64 || len(coinsEncaps) != 32 {
 			return
@@ -35,7 +35,7 @@ func FuzzRoundtrip(f *testing.F) {
 	})
 }
 
-// FuzzDecapsulate ensures that malformed ciphertexts are handled safely 
+// FuzzDecapsulate ensures that malformed ciphertexts are handled safely
 // (constant-time implicit rejection without panics).
 func FuzzDecapsulate(f *testing.F) {
 	kp, _ := GenerateKeyPair(Kyber768)

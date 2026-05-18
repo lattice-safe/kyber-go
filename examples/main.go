@@ -9,7 +9,7 @@ import (
 
 func main() {
 	fmt.Println("=== ML-KEM / CRYSTALS-Kyber Example ===")
-	
+
 	// 1. Generate Key Pair (ML-KEM-768 / NIST Level 3)
 	fmt.Println("Generating ML-KEM-768 key pair...")
 	kp, err := kyber.GenerateKeyPair(kyber.Kyber768)
