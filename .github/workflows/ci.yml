@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+        cache: true
+
+    - name: Verify Formatting
+      run: if [ -n "$(gofmt -l .)" ]; then echo "Go code is not formatted"; exit 1; fi
+
+    - name: Run Vet
+      run: go vet ./...
+
+    - name: Run Tests
+      run: go test -v -coverprofile=coverage.txt ./...
+
+    - name: Run Benchmarks
+      run: go test -bench=. -benchmem ./...
+
+    - name: Run Fuzz Tests (Short)
+      run: |
+        go test -fuzz=FuzzRoundtrip -fuzztime=10s ./...
+        go test -fuzz=FuzzDecapsulate -fuzztime=10s ./...
