@@ -1,11 +1,16 @@
 package kyber
 
-// KeypairDerand generates ML-KEM key pair deterministically from 64 bytes of coins.
-func KeypairDerand(mode *Mode, coins []byte) ([]byte, []byte) {
+// keypairDerand generates ML-KEM key pair deterministically from 64 bytes of coins.
+func keypairDerand(mode *Mode, coins []byte) ([]byte, []byte) {
 	pk, skCpa := indcpaKeypairDerand(mode, coins[:32])
+	defer func() {
+		for i := range skCpa {
+			skCpa[i] = 0
+		}
+	}()
 
 	sk := make([]byte, mode.SecretKeyBytes())
-	cpaLen := mode.IndcpaSecretkeyBytes()
+	cpaLen := mode.indcpaSecretkeyBytes()
 	pkLen := mode.PublicKeyBytes()
 
 	copy(sk[:cpaLen], skCpa)
@@ -20,9 +25,14 @@ func KeypairDerand(mode *Mode, coins []byte) ([]byte, []byte) {
 	return pk, sk
 }
 
-// EncapsDerand encapsulates deterministically, generating shared secret and ciphertext.
-func EncapsDerand(mode *Mode, pk []byte, coins []byte) ([]byte, []byte) {
+// encapsDerand encapsulates deterministically, generating shared secret and ciphertext.
+func encapsDerand(mode *Mode, pk []byte, coins []byte) ([]byte, []byte) {
 	var buf [64]byte
+	defer func() {
+		for i := range buf {
+			buf[i] = 0
+		}
+	}()
 	copy(buf[:32], coins)
 
 	var hPk [32]byte
@@ -30,6 +40,11 @@ func EncapsDerand(mode *Mode, pk []byte, coins []byte) ([]byte, []byte) {
 	copy(buf[32:64], hPk[:])
 
 	var kr [64]byte
+	defer func() {
+		for i := range kr {
+			kr[i] = 0
+		}
+	}()
 	hashG(kr[:], buf[:])
 
 	ct := make([]byte, mode.CiphertextBytes())
@@ -40,30 +55,55 @@ func EncapsDerand(mode *Mode, pk []byte, coins []byte) ([]byte, []byte) {
 	return ct, ss
 }
 
-// Decaps recovers shared secret from ciphertext.
-func Decaps(mode *Mode, ct []byte, sk []byte) []byte {
-	cpaLen := mode.IndcpaSecretkeyBytes()
+// decaps recovers shared secret from ciphertext.
+func decaps(mode *Mode, ct []byte, sk []byte) []byte {
+	cpaLen := mode.indcpaSecretkeyBytes()
 	pkLen := mode.PublicKeyBytes()
 
 	pk := sk[cpaLen : cpaLen+pkLen]
 
 	var buf [64]byte
+	defer func() {
+		for i := range buf {
+			buf[i] = 0
+		}
+	}()
 	var m [32]byte
+	defer func() {
+		for i := range m {
+			m[i] = 0
+		}
+	}()
 	indcpaDec(mode, m[:], ct, sk[:cpaLen])
 	copy(buf[:32], m[:])
 
 	copy(buf[32:64], sk[cpaLen+pkLen:cpaLen+pkLen+32])
 
 	var kr [64]byte
+	defer func() {
+		for i := range kr {
+			kr[i] = 0
+		}
+	}()
 	hashG(kr[:], buf[:])
 
 	cmp := make([]byte, mode.CiphertextBytes())
+	defer func() {
+		for i := range cmp {
+			cmp[i] = 0
+		}
+	}()
 	indcpaEnc(mode, cmp, buf[:32], pk, kr[32:64])
 
 	fail := verify(ct, cmp)
 
-	z := sk[mode.SecretKeyBytes()-SYMBYTES:]
+	z := sk[mode.SecretKeyBytes()-symBytes:]
 	var ssReject [32]byte
+	defer func() {
+		for i := range ssReject {
+			ssReject[i] = 0
+		}
+	}()
 	rkprf(ssReject[:], z, ct)
 
 	ss := make([]byte, SSBYTES)

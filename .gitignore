@@ -1,0 +1,5 @@
+coverage.out
+coverage.txt
+*.test
+*.out
+*.prof

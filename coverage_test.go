@@ -37,22 +37,20 @@ func TestCoverage(t *testing.T) {
 
 	// 2. api.go Zeroize on KeyPair
 	kp.Zeroize()
-	for _, b := range kp.PublicKey() {
-		if b != 0 {
-			t.Fatalf("public key not zeroized")
-		}
+	if kp.PublicKey() != nil {
+		t.Fatalf("expected PublicKey() to be nil after Zeroize")
 	}
 
-	// 4. poly.go / polyvec.go Compress / Decompress panics
-	badModePoly := &Mode{PolyCompressedBytes: 999}
-	p := NewPoly()
-	assertPanic(t, func() { p.Compress(make([]byte, 1000), badModePoly) })
-	assertPanic(t, func() { DecompressToPoly(make([]byte, 1000), badModePoly) })
+	// 4. poly.go / polyvec.go compress / decompress panics
+	badModePoly := &Mode{polyCompressedBytes: 999}
+	p := newPoly()
+	assertPanic(t, func() { p.compress(make([]byte, 1000), badModePoly) })
+	assertPanic(t, func() { decompressToPoly(make([]byte, 1000), badModePoly) })
 
-	badModePolyVec := &Mode{K: 2, PolyvecCompressedBytes: 999}
-	pv := NewPolyVec(2)
-	assertPanic(t, func() { pv.Compress(make([]byte, 1000), badModePolyVec) })
-	assertPanic(t, func() { DecompressToPolyVec(make([]byte, 1000), badModePolyVec) })
+	badModePolyVec := &Mode{k: 2, polyvecCompressedBytes: 999}
+	pv := newPolyVec(2)
+	assertPanic(t, func() { pv.compress(make([]byte, 1000), badModePolyVec) })
+	assertPanic(t, func() { decompressToPolyVec(make([]byte, 1000), badModePolyVec) })
 
 	// 5. symmetric.go shake256
 	out := make([]byte, 32)

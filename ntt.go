@@ -1,7 +1,7 @@
 package kyber
 
 // Pre-computed zetas in Montgomery domain (from C reference).
-var ZETAS = [128]int16{
+var zetas = [128]int16{
 	-1044, -758, -359, -1517, 1493, 1422, 287, 202, -171, 622, 1577, 182, 962, -1202, -1474, 1468,
 	573, -1325, 264, 383, -829, 1458, -1602, -130, -681, 1017, 732, 608, -1542, 411, -205, -1571,
 	1223, 652, -552, 1015, -1293, 1491, -282, -1544, 516, -8, -320, -666, -1618, -1162, 126, 1469,
@@ -12,13 +12,13 @@ var ZETAS = [128]int16{
 	-1530, -1278, 794, -1510, -854, -870, 478, -108, -308, 996, 991, 958, -1460, 1522, 1628,
 }
 
-func ntt(r *[N]int16) {
+func ntt(r *[n]int16) {
 	k := 1
 	len_ := 128
 	for len_ >= 2 {
 		start := 0
 		for start < 256 {
-			zeta := ZETAS[k]
+			zeta := zetas[k]
 			k++
 			for j := start; j < start+len_; j++ {
 				t := fqmul(zeta, r[j+len_])
@@ -31,14 +31,14 @@ func ntt(r *[N]int16) {
 	}
 }
 
-func invntt(r *[N]int16) {
+func invntt(r *[n]int16) {
 	f := int16(1441) // mont^2/128
 	k := 127
 	len_ := 2
 	for len_ <= 128 {
 		start := 0
 		for start < 256 {
-			zeta := ZETAS[k]
+			zeta := zetas[k]
 			k--
 			for j := start; j < start+len_; j++ {
 				t := r[j]

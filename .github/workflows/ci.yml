@@ -10,12 +10,12 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: '1.22'
+        go-version-file: go.mod
         cache: true
 
     - name: Verify Formatting
@@ -24,13 +24,22 @@ jobs:
     - name: Run Vet
       run: go vet ./...
 
+    - name: Run Staticcheck
+      run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+    - name: Run Govulncheck
+      run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
     - name: Run Tests
       run: go test -v -coverprofile=coverage.txt ./...
+
+    - name: Run Tests (race detector)
+      run: go test -race -count=1 ./...
 
     - name: Run Benchmarks
       run: go test -bench=. -benchmem ./...
 
     - name: Run Fuzz Tests (Short)
       run: |
-        go test -fuzz=FuzzRoundtrip -fuzztime=10s ./...
-        go test -fuzz=FuzzDecapsulate -fuzztime=10s ./...
+        go test -run=^$ -fuzz=FuzzRoundtrip -fuzztime=10s .
+        go test -run=^$ -fuzz=FuzzDecapsulate -fuzztime=10s .

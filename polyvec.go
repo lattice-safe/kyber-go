@@ -1,79 +1,113 @@
 package kyber
 
-type PolyVec struct {
-	vec []*Poly
+type polyVec struct {
+	vec []*poly
 }
 
-func NewPolyVec(k int) *PolyVec {
-	vec := make([]*Poly, k)
+func newPolyVec(k int) *polyVec {
+	vec := make([]*poly, k)
 	for i := range vec {
-		vec[i] = NewPoly()
+		vec[i] = newPoly()
 	}
-	return &PolyVec{vec: vec}
+	return &polyVec{vec: vec}
 }
 
-func (pv *PolyVec) Ntt() {
+// zero overwrites every coefficient of every polynomial in the vector with
+// 0. Used to wipe secret intermediates from memory once they are no longer
+// needed.
+func (pv *polyVec) zero() {
 	for _, p := range pv.vec {
-		p.Ntt()
+		p.zero()
 	}
 }
 
-func (pv *PolyVec) InvnttTomont() {
+func (pv *polyVec) ntt() {
 	for _, p := range pv.vec {
-		p.InvnttTomont()
+		p.ntt()
 	}
 }
 
-func (pv *PolyVec) Reduce() {
+func (pv *polyVec) invnttTomont() {
 	for _, p := range pv.vec {
-		p.Reduce()
+		p.invnttTomont()
 	}
 }
 
-func (pv *PolyVec) Add(a, b *PolyVec) {
+func (pv *polyVec) reduce() {
+	for _, p := range pv.vec {
+		p.reduce()
+	}
+}
+
+func (pv *polyVec) add(a, b *polyVec) {
 	for i := range pv.vec {
-		pv.vec[i].Add(a.vec[i], b.vec[i])
+		pv.vec[i].add(a.vec[i], b.vec[i])
 	}
 }
 
-func BasemulAccMontgomery(r *Poly, a, b *PolyVec) {
-	t := NewPoly()
-	r.BasemulMontgomery(a.vec[0], b.vec[0])
+func basemulAccMontgomery(r *poly, a, b *polyVec) {
+	t := newPoly()
+	r.basemulMontgomery(a.vec[0], b.vec[0])
 	for i := 1; i < len(a.vec); i++ {
-		t.BasemulMontgomery(a.vec[i], b.vec[i])
-		for j := 0; j < N; j++ {
+		t.basemulMontgomery(a.vec[i], b.vec[i])
+		for j := 0; j < n; j++ {
 			r.coeffs[j] += t.coeffs[j]
 		}
 	}
-	r.Reduce()
+	r.reduce()
 }
 
-func (pv *PolyVec) Tobytes(r []byte) {
+func (pv *polyVec) tobytes(r []byte) {
 	for i := range pv.vec {
-		pv.vec[i].Tobytes(r[i*POLYBYTES : (i+1)*POLYBYTES])
+		pv.vec[i].tobytes(r[i*polyBytes : (i+1)*polyBytes])
 	}
 }
 
-func FrombytesToPolyVec(a []byte, k int) *PolyVec {
-	pv := NewPolyVec(k)
+func frombytesToPolyVec(a []byte, k int) *polyVec {
+	pv := newPolyVec(k)
 	for i := 0; i < k; i++ {
-		pv.vec[i] = FrombytesToPoly(a[i*POLYBYTES : (i+1)*POLYBYTES])
+		pv.vec[i] = frombytesToPoly(a[i*polyBytes : (i+1)*polyBytes])
 	}
 	return pv
 }
 
-func (pv *PolyVec) Compress(r []byte, mode *Mode) {
-	k := mode.K
-	switch mode.PolyvecCompressedBytes / k {
-	case 352:
+// compress10 maps a coefficient u already normalized to [0, q) to a 10-bit
+// value, computed without dividing by q (KyberSlash hardening).
+func compress10(u uint16) uint16 {
+	t := uint64(u) << 10
+	t += 1665
+	t = (t * 1290167) >> 32
+	t &= 0x3FF
+	return uint16(t)
+}
+
+// compress11 maps a coefficient u already normalized to [0, q) to an 11-bit
+// value, computed without dividing by q (KyberSlash hardening).
+func compress11(u uint16) uint16 {
+	t := uint64(u) << 11
+	t += 1664
+	t = (t * 645084) >> 31
+	t &= 0x7FF
+	return uint16(t)
+}
+
+func (pv *polyVec) compress(r []byte, mode *Mode) {
+	k := mode.k
+	// Switch on mode.polyvecCompressedBytes directly (not
+	// polyvecCompressedBytes/k): avoids any DIV instruction on this path,
+	// while still panicking on a malformed Mode the same way the old
+	// polyvecCompressedBytes/k switch did.
+	switch mode.polyvecCompressedBytes {
+	case 1408: // k=4, 352 bytes/poly
 		idx := 0
 		for i := 0; i < k; i++ {
-			for j := 0; j < N/8; j++ {
+			for j := 0; j < n/8; j++ {
 				var t [8]uint16
 				for m := 0; m < 8; m++ {
 					u := pv.vec[i].coeffs[8*j+m]
-					u += (u >> 15) & Q
-					t[m] = uint16((((uint32(u) << 11) + uint32(Q)/2) / uint32(Q)) & 0x7FF)
+					u += (u >> 15) & q
+					// Division-free (KyberSlash hardening): no `/ q` may appear on secret data.
+					t[m] = compress11(uint16(u))
 				}
 				r[idx] = byte(t[0])
 				r[idx+1] = byte((t[0] >> 8) | (t[1] << 3))
@@ -89,15 +123,16 @@ func (pv *PolyVec) Compress(r []byte, mode *Mode) {
 				idx += 11
 			}
 		}
-	case 320:
+	case 640, 960: // k=2 or k=3, 320 bytes/poly
 		idx := 0
 		for i := 0; i < k; i++ {
-			for j := 0; j < N/4; j++ {
+			for j := 0; j < n/4; j++ {
 				var t [4]uint16
 				for m := 0; m < 4; m++ {
 					u := pv.vec[i].coeffs[4*j+m]
-					u += (u >> 15) & Q
-					t[m] = uint16((((uint32(u) << 10) + uint32(Q)/2) / uint32(Q)) & 0x3FF)
+					u += (u >> 15) & q
+					// Division-free (KyberSlash hardening): no `/ q` may appear on secret data.
+					t[m] = compress10(uint16(u))
 				}
 				r[idx] = byte(t[0])
 				r[idx+1] = byte((t[0] >> 8) | (t[1] << 2))
@@ -112,14 +147,16 @@ func (pv *PolyVec) Compress(r []byte, mode *Mode) {
 	}
 }
 
-func DecompressToPolyVec(a []byte, mode *Mode) *PolyVec {
-	k := mode.K
-	pv := NewPolyVec(k)
-	switch mode.PolyvecCompressedBytes / k {
-	case 352:
+func decompressToPolyVec(a []byte, mode *Mode) *polyVec {
+	k := mode.k
+	pv := newPolyVec(k)
+	// See the matching comment in compress for why this switches on
+	// polyvecCompressedBytes directly rather than polyvecCompressedBytes/k.
+	switch mode.polyvecCompressedBytes {
+	case 1408: // k=4, 352 bytes/poly
 		idx := 0
 		for i := 0; i < k; i++ {
-			for j := 0; j < N/8; j++ {
+			for j := 0; j < n/8; j++ {
 				var t [8]uint16
 				t[0] = (uint16(a[idx]) | (uint16(a[idx+1]) << 8)) & 0x7FF
 				t[1] = ((uint16(a[idx+1]) >> 3) | (uint16(a[idx+2]) << 5)) & 0x7FF
@@ -131,14 +168,14 @@ func DecompressToPolyVec(a []byte, mode *Mode) *PolyVec {
 				t[7] = ((uint16(a[idx+9]) >> 5) | (uint16(a[idx+10]) << 3)) & 0x7FF
 				idx += 11
 				for m, tm := range t {
-					pv.vec[i].coeffs[8*j+m] = int16((uint32(tm)*uint32(Q) + 1024) >> 11)
+					pv.vec[i].coeffs[8*j+m] = int16((uint32(tm)*uint32(q) + 1024) >> 11)
 				}
 			}
 		}
-	case 320:
+	case 640, 960: // k=2 or k=3, 320 bytes/poly
 		idx := 0
 		for i := 0; i < k; i++ {
-			for j := 0; j < N/4; j++ {
+			for j := 0; j < n/4; j++ {
 				var t [4]uint16
 				t[0] = (uint16(a[idx]) | (uint16(a[idx+1]) << 8)) & 0x3FF
 				t[1] = ((uint16(a[idx+1]) >> 2) | (uint16(a[idx+2]) << 6)) & 0x3FF
@@ -146,7 +183,7 @@ func DecompressToPolyVec(a []byte, mode *Mode) *PolyVec {
 				t[3] = ((uint16(a[idx+3]) >> 6) | (uint16(a[idx+4]) << 2)) & 0x3FF
 				idx += 5
 				for m, tm := range t {
-					pv.vec[i].coeffs[4*j+m] = int16((uint32(tm)*uint32(Q) + 512) >> 10)
+					pv.vec[i].coeffs[4*j+m] = int16((uint32(tm)*uint32(q) + 512) >> 10)
 				}
 			}
 		}

@@ -21,29 +21,29 @@ func rejUniform(r []int16, buf []byte) int {
 	return ctr
 }
 
-const XOF_BLOCKBYTES = 168
+const xofBlockBytes = 168
 
-func genMatrix(mode *Mode, seed []byte, transposed bool) []*PolyVec {
-	k := mode.K
-	genNblocks := ((12 * N / 8 * (1 << 12) / 3329) + XOF_BLOCKBYTES) / XOF_BLOCKBYTES
+func genMatrix(mode *Mode, seed []byte, transposed bool) []*polyVec {
+	k := mode.k
+	genNblocks := ((12 * n / 8 * (1 << 12) / 3329) + xofBlockBytes) / xofBlockBytes
 
-	a := make([]*PolyVec, k)
+	a := make([]*polyVec, k)
 	for i := 0; i < k; i++ {
-		a[i] = NewPolyVec(k)
+		a[i] = newPolyVec(k)
 	}
 
 	for i := 0; i < k; i++ {
 		for j := 0; j < k; j++ {
-			si, sj := i, j
+			si, sj := j, i
 			if transposed {
-				si, sj = j, i
+				si, sj = i, j
 			}
 			state := absorbXof(seed, byte(si), byte(sj))
-			buf := make([]byte, genNblocks*XOF_BLOCKBYTES)
+			buf := make([]byte, genNblocks*xofBlockBytes)
 			state.squeeze(buf)
 			ctr := rejUniform(a[i].vec[j].coeffs[:], buf)
-			for ctr < N {
-				extra := make([]byte, XOF_BLOCKBYTES)
+			for ctr < n {
+				extra := make([]byte, xofBlockBytes)
 				state.squeeze(extra)
 				ctr += rejUniform(a[i].vec[j].coeffs[ctr:], extra)
 			}
@@ -53,125 +53,151 @@ func genMatrix(mode *Mode, seed []byte, transposed bool) []*PolyVec {
 }
 
 func indcpaKeypairDerand(mode *Mode, coins []byte) ([]byte, []byte) {
-	k := mode.K
+	k := mode.k
 
 	var buf [64]byte
+	defer func() {
+		for i := range buf {
+			buf[i] = 0
+		}
+	}()
 	var seedInput [33]byte
+	defer func() {
+		for i := range seedInput {
+			seedInput[i] = 0
+		}
+	}()
 	copy(seedInput[:32], coins)
 	seedInput[32] = byte(k)
 	hashG(buf[:], seedInput[:])
 
+	// publicseed is embedded in the public key and is not secret.
 	publicseed := buf[:32]
 	noiseseed := buf[32:64]
 
 	a := genMatrix(mode, publicseed, false)
 
 	var nonce byte = 0
-	skpv := NewPolyVec(k)
-	e := NewPolyVec(k)
+	skpv := newPolyVec(k)
+	defer skpv.zero()
+	e := newPolyVec(k)
+	defer e.zero()
 
 	for i := 0; i < k; i++ {
-		skpv.vec[i] = GetNoise(noiseseed, nonce, mode.Eta1)
+		skpv.vec[i] = getNoise(noiseseed, nonce, mode.eta1)
 		nonce++
 	}
 	for i := 0; i < k; i++ {
-		e.vec[i] = GetNoise(noiseseed, nonce, mode.Eta1)
+		e.vec[i] = getNoise(noiseseed, nonce, mode.eta1)
 		nonce++
 	}
 
-	skpv.Ntt()
-	e.Ntt()
+	skpv.ntt()
+	e.ntt()
 
-	pkpv := NewPolyVec(k)
+	pkpv := newPolyVec(k)
 	for i := 0; i < k; i++ {
-		BasemulAccMontgomery(pkpv.vec[i], a[i], skpv)
-		pkpv.vec[i].Tomont()
+		basemulAccMontgomery(pkpv.vec[i], a[i], skpv)
+		pkpv.vec[i].tomont()
 	}
-	pkpv.Add(pkpv, e)
-	pkpv.Reduce()
+	pkpv.add(pkpv, e)
+	pkpv.reduce()
 
-	pkBytes := mode.IndcpaPublickeyBytes()
-	skBytes := mode.IndcpaSecretkeyBytes()
+	pkBytes := mode.indcpaPublickeyBytes()
+	skBytes := mode.indcpaSecretkeyBytes()
 	pk := make([]byte, pkBytes)
 	sk := make([]byte, skBytes)
 
-	skpv.Tobytes(sk)
-	pkpv.Tobytes(pk[:mode.PolyvecBytes()])
-	copy(pk[mode.PolyvecBytes():], publicseed)
+	skpv.tobytes(sk)
+	pkpv.tobytes(pk[:mode.polyvecBytes()])
+	copy(pk[mode.polyvecBytes():], publicseed)
 
 	return pk, sk
 }
 
 func indcpaEnc(mode *Mode, ct []byte, msg []byte, pk []byte, coins []byte) {
-	k := mode.K
-	pvb := mode.PolyvecBytes()
+	k := mode.k
+	pvb := mode.polyvecBytes()
 
-	pkpv := FrombytesToPolyVec(pk[:pvb], k)
+	pkpv := frombytesToPolyVec(pk[:pvb], k)
 	var seed [32]byte
 	copy(seed[:], pk[pvb:pvb+32])
 
 	at := genMatrix(mode, seed[:], true)
 
 	var nonce byte = 0
-	sp := NewPolyVec(k)
-	ep := NewPolyVec(k)
+	sp := newPolyVec(k)
+	defer sp.zero()
+	ep := newPolyVec(k)
+	defer ep.zero()
 
 	for i := 0; i < k; i++ {
-		sp.vec[i] = GetNoise(coins, nonce, mode.Eta1)
+		sp.vec[i] = getNoise(coins, nonce, mode.eta1)
 		nonce++
 	}
 	for i := 0; i < k; i++ {
-		ep.vec[i] = GetNoise(coins, nonce, mode.Eta2)
+		ep.vec[i] = getNoise(coins, nonce, mode.eta2)
 		nonce++
 	}
-	epp := GetNoise(coins, nonce, mode.Eta2)
+	epp := getNoise(coins, nonce, mode.eta2)
+	defer epp.zero()
 
-	sp.Ntt()
+	sp.ntt()
 
-	b := NewPolyVec(k)
+	b := newPolyVec(k)
+	defer b.zero()
 	for i := 0; i < k; i++ {
-		BasemulAccMontgomery(b.vec[i], at[i], sp)
+		basemulAccMontgomery(b.vec[i], at[i], sp)
 	}
 
-	v := NewPoly()
-	BasemulAccMontgomery(v, pkpv, sp)
+	v := newPoly()
+	defer v.zero()
+	basemulAccMontgomery(v, pkpv, sp)
 
-	b.InvnttTomont()
-	v.InvnttTomont()
+	b.invnttTomont()
+	v.invnttTomont()
 
-	b.Add(b, ep)
-	kPoly := Frommsg(msg)
-	v2 := NewPoly()
-	v2.Add(v, epp)
-	v3 := NewPoly()
-	v3.Add(v2, kPoly)
+	b.add(b, ep)
+	kPoly := frommsg(msg)
+	defer kPoly.zero()
+	v2 := newPoly()
+	defer v2.zero()
+	v2.add(v, epp)
+	v3 := newPoly()
+	defer v3.zero()
+	v3.add(v2, kPoly)
 	v = v3
 
-	b.Reduce()
-	v.Reduce()
+	b.reduce()
+	v.reduce()
 
-	pvcb := mode.PolyvecCompressedBytes
-	b.Compress(ct[:pvcb], mode)
-	v.Compress(ct[pvcb:], mode)
+	pvcb := mode.polyvecCompressedBytes
+	b.compress(ct[:pvcb], mode)
+	v.compress(ct[pvcb:], mode)
 }
 
 func indcpaDec(mode *Mode, msg []byte, ct []byte, sk []byte) {
-	k := mode.K
-	pvcb := mode.PolyvecCompressedBytes
+	k := mode.k
+	pvcb := mode.polyvecCompressedBytes
 
-	b := DecompressToPolyVec(ct[:pvcb], mode)
-	v := DecompressToPoly(ct[pvcb:], mode)
+	b := decompressToPolyVec(ct[:pvcb], mode)
+	defer b.zero()
+	v := decompressToPoly(ct[pvcb:], mode)
+	defer v.zero()
 
-	skpv := FrombytesToPolyVec(sk, k)
+	skpv := frombytesToPolyVec(sk, k)
+	defer skpv.zero()
 
-	b.Ntt()
-	mp := NewPoly()
-	BasemulAccMontgomery(mp, skpv, b)
-	mp.InvnttTomont()
+	b.ntt()
+	mp := newPoly()
+	defer mp.zero()
+	basemulAccMontgomery(mp, skpv, b)
+	mp.invnttTomont()
 
-	result := NewPoly()
-	result.Sub(v, mp)
-	result.Reduce()
+	result := newPoly()
+	defer result.zero()
+	result.sub(v, mp)
+	result.reduce()
 
-	result.Tomsg(msg)
+	result.tomsg(msg)
 }
